@@ -1,0 +1,38 @@
+#!/bin/bash
+
+sudo su
+apt update
+apt upgrade
+apt install ifconfig
+apt install iptables # required to use IP routing and NAT
+apt install resolvconf # required to use dns, there's no need to manually include the DNS addresses in the wg0.conf file too, but I digress
+# you can change the dns by editing the /etc/resolv.conf file
+apt install wireguard
+cd /etc/wireguard
+wg genkey | tee privatekey | wg pubkey > publickey
+
+# contents can also be found on wg0.conf in this repo
+cat <<-EOF > wg0.conf
+[Interface]
+PrivateKey = $(cat /etc/wireguard/privatekey)
+DNS = 8.8.8.8
+DNS = 8.8.4.4
+SaveConfig = true
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE # in my case eth0 is the name of the network device used
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+Address = 10.0.0.1/24
+ListenPort = 51820
+
+[Peer]
+PublicKey = # insert client public key here
+AllowedIPs = 10.0.0.2/32
+Endpoint = # <router-public-ip>:51820 # I personally use IP forwarding on my router, so just the router's public IP here
+PersistentKeepalive = 25
+EOF
+
+echo "net.ipv4.ip_forward = 1" | cat >> /etc/sysctl.conf 
+sysctl -p
+systemctl enable wg-quick@wg0
+systemctl start wg-quick@wg0
+
+# enjoy!
